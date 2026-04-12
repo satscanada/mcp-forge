@@ -35,5 +35,6 @@ Thumbs.db
 .idea/
 *.swp
 
+# Markdown: ignore all markdown files except the repo root README
 *.md
-!README.md
+!/README.md
