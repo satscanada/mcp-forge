@@ -1,0 +1,36 @@
+# Generated server output — never commit
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Environment / secrets
+.env
+*.env
+!examples/**/.env.example
+
+# Temp files
+*.tmp
+*.zip
+mcp_forge_*.zip
+
+# Node / UI
+ui/node_modules/
+ui/dist/
+ui/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
