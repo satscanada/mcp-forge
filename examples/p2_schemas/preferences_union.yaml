@@ -1,0 +1,22 @@
+PreferenceUpdateRequest:
+  oneOf:
+    - type: object
+      required:
+        - email_opt_in
+      properties:
+        email_opt_in:
+          type: boolean
+          description: Whether the customer accepts email communications
+        email_address:
+          type: string
+          description: Preferred email address for notifications
+    - type: object
+      required:
+        - sms_opt_in
+      properties:
+        sms_opt_in:
+          type: boolean
+          description: Whether the customer accepts SMS communications
+        phone_number:
+          type: string
+          description: Preferred phone number for SMS alerts

@@ -17,6 +17,7 @@ For the fastest banking example path, see [QUICKSTART.md](./QUICKSTART.md).
 git clone <this-repo>
 cd mcp-forge
 pip install pyyaml openapi-spec-validator
+pip install jinja2
 ```
 
 That's it. No other dependencies for the CLI itself.
@@ -148,10 +149,17 @@ Copy `.mcp.json` into your MCP client's config directory. Adjust the path to `se
 | Multi-layer timeouts | connect 10s / read 60s / tool 90s | `HTTPX_*_TIMEOUT`, `TOOL_EXECUTION_TIMEOUT` |
 | Connection pool | 100 connections, 20 keepalive | `CONNECTION_POOL_SIZE`, `MAX_KEEPALIVE_CONNECTIONS` |
 
-### Authentication (Phase 1: API Key)
+### Authentication
 
-Auto-detected from `securitySchemes` in your spec. Injects into header, query, or cookie
-depending on where the spec declares it. Per-operation routing via `OPERATION_AUTH_MAP`.
+Auto-detected from `securitySchemes` in your spec. The generator now supports:
+- API Key
+- HTTP Bearer
+- HTTP Basic
+- OAuth2 client credentials
+
+Per-operation routing is handled via `OPERATION_AUTH_MAP`. Generated auth handlers read
+scheme-specific environment variables from `.env`, and operations return an
+`auth_unavailable` error if their required credentials are not configured.
 
 ### Validation and Sanitization
 
@@ -191,7 +199,7 @@ Errors always block generation. Warnings block only with `--strict`.
 ## Roadmap
 
 - **Phase 2** — Jinja2 templates, recursive `$ref` resolution, richer request body support, `vacuum` linting
-- **Phase 3** — Bearer, HTTP Basic, OAuth2, JWT, mTLS auth handlers
+- **Phase 3** — JWT, mTLS, broader OAuth2 flows, and auth override controls
 - **Phase 4** — Enhancement passes: metadata filter, parameter filter, LLM-powered tool enhancer
 - **Phase 5** — Web UI (FastAPI + React) mirroring the MCP Blacksmith dashboard
 

@@ -1,0 +1,20 @@
+ProfileUpdateRequest:
+  allOf:
+    - $ref: "./shared.yaml#/components/schemas/CustomerIdentity"
+    - type: object
+      required:
+        - marketing_opt_in
+      properties:
+        marketing_opt_in:
+          type: boolean
+          description: Whether the customer opted into marketing notifications
+        preferred_contact:
+          oneOf:
+            - type: string
+            - type: object
+              properties:
+                channel:
+                  type: string
+                value:
+                  type: string
+          description: Preferred contact route

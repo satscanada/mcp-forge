@@ -1,0 +1,56 @@
+components:
+  parameters:
+    CustomerId:
+      name: customerId
+      in: path
+      required: true
+      description: Unique customer identifier
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    BaseIdentity:
+      type: object
+      required:
+        - legal_name
+      properties:
+        legal_name:
+          type: string
+          description: Legal customer name
+        birth_date:
+          type: string
+          format: date
+          description: Birth date for identity verification
+
+    CustomerIdentity:
+      allOf:
+        - $ref: "#/components/schemas/BaseIdentity"
+        - type: object
+          required:
+            - customer_tier
+          properties:
+            customer_tier:
+              type: string
+              enum: [standard, premium, private]
+              description: Customer servicing tier
+            alternate_id:
+              anyOf:
+                - type: string
+                - type: integer
+              description: Alternate legacy identifier
+
+    ProfileResponse:
+      allOf:
+        - $ref: "#/components/schemas/CustomerIdentity"
+        - type: object
+          properties:
+            preference_snapshot:
+              oneOf:
+                - type: string
+                - type: object
+                  properties:
+                    channel:
+                      type: string
+                    enabled:
+                      type: boolean

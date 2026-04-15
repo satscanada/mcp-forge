@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""_auth.py — Authentication handlers for this MCP server."""
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+logger = logging.getLogger(__name__)
+
+__all__ = [{% for class_name in class_names %}{{ class_name | pystr }}, {% endfor %}"OPERATION_AUTH_MAP", "build_auth_registry"]
+
+# ════════════════════════════════════════════════════
+# Authentication Classes
+# ════════════════════════════════════════════════════
+
+{% if "APIKeyAuth" in class_names %}
+class APIKeyAuth:
+    """API Key authentication — injects key into header, query, or cookie."""
+    def __init__(self, env_var: str = "API_KEY", location: str = "header",
+                 param_name: str = "X-API-Key", prefix: str = ""):
+        self.location = location
+        self.param_name = param_name
+        self.prefix = prefix
+        self.api_key = os.getenv(env_var, "").strip()
+        if not self.api_key:
+            raise ValueError(
+                f"{env_var} environment variable not set. "
+                "Set it in .env to enable API Key auth."
+            )
+        _bad = ["placeholder", "your-", "example", "change-me", "todo"]
+        if any(b in self.api_key.lower() for b in _bad):
+            logger.warning("%s looks like a placeholder — did you set a real key?", env_var)
+
+    def inject(self, headers: dict, params: dict, cookies: dict) -> None:
+        value = f"{self.prefix} {self.api_key}".strip() if self.prefix else self.api_key
+        if self.location == "header":
+            headers[self.param_name] = value
+        elif self.location == "query":
+            params[self.param_name] = value
+        elif self.location == "cookie":
+            cookies[self.param_name] = value
+
+    def is_available(self) -> bool:
+        return bool(self.api_key)
+
+{% endif %}
+{% if "BearerTokenAuth" in class_names %}
+class BearerTokenAuth:
+    """HTTP Bearer authentication using a static token from the environment."""
+    def __init__(self, env_var: str = "BEARER_TOKEN"):
+        self.env_var = env_var
+        self.token = os.getenv(env_var, "").strip()
+        if not self.token:
+            raise ValueError(
+                f"{env_var} environment variable not set. "
+                "Set it in .env to enable Bearer auth."
+            )
+
+    def inject(self, headers: dict, params: dict, cookies: dict) -> None:
+        headers["Authorization"] = f"Bearer {self.token}"
+
+    def is_available(self) -> bool:
+        return bool(self.token)
+
+{% endif %}
+{% if "BasicAuth" in class_names %}
+class BasicAuth:
+    """HTTP Basic authentication using username/password from the environment."""
+    def __init__(self, username_env: str = "BASIC_AUTH_USERNAME", password_env: str = "BASIC_AUTH_PASSWORD"):
+        self.username = os.getenv(username_env, "").strip()
+        self.password = os.getenv(password_env, "").strip()
+        if not self.username or not self.password:
+            raise ValueError(
+                f"{username_env}/{password_env} environment variables not set. "
+                "Set them in .env to enable HTTP Basic auth."
+            )
+
+    def inject(self, headers: dict, params: dict, cookies: dict) -> None:
+        raw = f"{self.username}:{self.password}".encode("utf-8")
+        headers["Authorization"] = "Basic " + base64.b64encode(raw).decode("ascii")
+
+    def is_available(self) -> bool:
+        return bool(self.username and self.password)
+
+{% endif %}
+{% if "OAuth2ClientCredentialsAuth" in class_names %}
+class OAuth2ClientCredentialsAuth:
+    """OAuth2 client credentials flow with lazy token fetch and refresh."""
+    def __init__(
+        self,
+        client_id_env: str = "OAUTH_CLIENT_ID",
+        client_secret_env: str = "OAUTH_CLIENT_SECRET",
+        token_url_env: str = "OAUTH_TOKEN_URL",
+        scopes_env: str = "OAUTH_SCOPES",
+        default_token_url: str = "",
+        default_scopes: str = "",
+    ):
+        self.client_id = os.getenv(client_id_env, "").strip()
+        self.client_secret = os.getenv(client_secret_env, "").strip()
+        self.token_url = os.getenv(token_url_env, default_token_url).strip()
+        self.scopes = os.getenv(scopes_env, default_scopes).strip()
+        self._access_token = ""
+        self._expires_at = 0.0
+        if not self.client_id or not self.client_secret or not self.token_url:
+            raise ValueError(
+                f"OAuth2 client credentials env vars missing for {client_id_env}/{client_secret_env}/{token_url_env}. "
+                "Set them in .env to enable OAuth2 client credentials auth."
+            )
+
+    def _fetch_token(self) -> None:
+        payload = {"grant_type": "client_credentials"}
+        if self.scopes:
+            payload["scope"] = self.scopes
+        data = urllib.parse.urlencode(payload).encode("utf-8")
+        credentials = f"{self.client_id}:{self.client_secret}".encode("utf-8")
+        auth_header = base64.b64encode(credentials).decode("ascii")
+        request = urllib.request.Request(
+            self.token_url,
+            data=data,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {auth_header}",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise ValueError(f"OAuth2 token fetch failed: {exc}") from exc
+
+        token = (payload.get("access_token") or "").strip()
+        if not token:
+            raise ValueError("OAuth2 token response did not include access_token")
+        expires_in = int(payload.get("expires_in", 3600) or 3600)
+        self._access_token = token
+        self._expires_at = time.time() + max(expires_in - 30, 30)
+
+    def inject(self, headers: dict, params: dict, cookies: dict) -> None:
+        if not self._access_token or time.time() >= self._expires_at:
+            self._fetch_token()
+        headers["Authorization"] = f"Bearer {self._access_token}"
+
+    def is_available(self) -> bool:
+        return bool(self.client_id and self.client_secret and self.token_url)
+
+{% endif %}
+# ════════════════════════════════════════════════════
+# Operation → Auth mapping
+# Outer list = OR (any one scheme works)
+# Inner list = AND (all schemes in group required)
+# ════════════════════════════════════════════════════
+OPERATION_AUTH_MAP: dict[str, list[list[str]]] = {
+{% for operation_id, auth_reqs in operation_auth_map.items() %}
+    {{ operation_id | pystr }}: {{ auth_reqs | pyrepr }},
+{% endfor %}
+}
+
+# ════════════════════════════════════════════════════
+# Auth registry — keyed by scheme name
+# ════════════════════════════════════════════════════
+def build_auth_registry() -> dict:
+    """Build auth handlers from environment. Missing creds = scheme disabled."""
+    registry: dict[str, object] = {}
+{% for scheme in scheme_contexts %}
+    try:
+        registry[{{ scheme.name | pystr }}] = {{ scheme.class_name }}(
+{% for arg in scheme.registry_args %}
+            {{ arg.name }}={{ arg.value | pystr }},
+{% endfor %}
+        )
+    except ValueError as e:
+        logger.warning("Auth setup for %s: %s", {{ scheme.name | pystr }}, e)
+{% endfor %}
+    return registry

@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""_models.py — Pydantic models for request parameters and responses."""
+from __future__ import annotations
+from typing import Any, Optional
+from pydantic import Field
+from _validators import StrictModel, PermissiveModel
+
+{% for operation in operations %}
+class {{ operation.class_name }}(StrictModel):
+    """Parameters for {{ operation.docstring }}."""
+{% if operation.fields %}
+{% for field in operation.fields %}
+    {{ field.name }}: {{ field.type_annotation }} = {{ field.default_expr }}
+{% endfor %}
+{% else %}
+    pass
+{% endif %}
+
+{% endfor %}

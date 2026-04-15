@@ -1,0 +1,71 @@
+openapi: "3.0.3"
+info:
+  title: Auth Expansion Demo API
+  version: "1.0.0"
+  description: Demo spec for Bearer, Basic, and OAuth2 client credentials auth generation.
+
+servers:
+  - url: https://api.example.com/v1
+
+paths:
+  /profile:
+    get:
+      operationId: getProfile
+      summary: Get profile with bearer auth
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Profile
+
+  /admin/report:
+    get:
+      operationId: getAdminReport
+      summary: Get admin report with basic auth
+      security:
+        - basicAuth: []
+      responses:
+        "200":
+          description: Admin report
+
+  /service/tokenized-sync:
+    post:
+      operationId: runTokenizedSync
+      summary: Run sync with OAuth2 client credentials
+      security:
+        - oauthClient: [sync:run]
+      responses:
+        "202":
+          description: Sync accepted
+
+  /dual-protected:
+    get:
+      operationId: getDualProtected
+      summary: Operation requiring both bearer and API key
+      security:
+        - bearerAuth: []
+          apiKeyAuth: []
+      responses:
+        "200":
+          description: Dual-protected response
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    basicAuth:
+      type: http
+      scheme: basic
+    oauthClient:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.example.com/oauth/token
+          scopes:
+            sync:run: Execute sync jobs

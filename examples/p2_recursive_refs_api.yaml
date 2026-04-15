@@ -1,0 +1,57 @@
+openapi: "3.0.3"
+info:
+  title: Recursive Ref Demo API
+  version: "1.0.0"
+  description: Demo spec for recursive internal and external $ref resolution.
+
+servers:
+  - url: https://api.example.com/v1
+
+paths:
+  /profiles/{customerId}:
+    get:
+      operationId: getProfile
+      summary: Get customer profile
+      parameters:
+        - $ref: "./p2_schemas/shared.yaml#/components/parameters/CustomerId"
+      responses:
+        "200":
+          description: Profile response
+          content:
+            application/json:
+              schema:
+                $ref: "./p2_schemas/shared.yaml#/components/schemas/ProfileResponse"
+    patch:
+      operationId: updateProfile
+      summary: Update customer profile
+      parameters:
+        - $ref: "./p2_schemas/shared.yaml#/components/parameters/CustomerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./p2_schemas/profile_update.yaml#/ProfileUpdateRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "./p2_schemas/shared.yaml#/components/schemas/ProfileResponse"
+
+  /preferences/{customerId}:
+    patch:
+      operationId: updatePreferences
+      summary: Update customer preferences
+      parameters:
+        - $ref: "./p2_schemas/shared.yaml#/components/parameters/CustomerId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "./p2_schemas/preferences_union.yaml#/PreferenceUpdateRequest"
+      responses:
+        "200":
+          description: Preferences updated

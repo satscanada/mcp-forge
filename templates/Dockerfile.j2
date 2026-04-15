@@ -1,0 +1,19 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy server files
+COPY . .
+
+# Never run as root
+RUN adduser --disabled-password --gecos "" mcpuser
+USER mcpuser
+
+EXPOSE 8000
+
+# Default: SSE transport for Docker deployments
+ENTRYPOINT ["python", "server.py", "--transport", "sse", "--port", "8000"]

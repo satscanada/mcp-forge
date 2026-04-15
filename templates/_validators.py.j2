@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""
+_validators.py — Format validators for OAS Format Registry compliance.
+Covers integer, number, date/time, identifiers, network, text, encoding formats.
+"""
+from __future__ import annotations
+import re, uuid, ipaddress, base64
+from datetime import date, datetime, time, timedelta
+from typing import Any
+from pydantic import BaseModel, ConfigDict
+
+# ── Base model classes ──────────────────────────────────────────────────────
+
+class StrictModel(BaseModel):
+    """Rejects unknown/extra fields — used for strict-mode operations."""
+    model_config = ConfigDict(
+        frozen=True, extra="forbid",
+        str_strip_whitespace=True, validate_assignment=True
+    )
+
+class PermissiveModel(BaseModel):
+    """Accepts additional fields — used for lenient response parsing."""
+    model_config = ConfigDict(
+        extra="allow",
+        str_strip_whitespace=True, validate_assignment=True
+    )
+
+# ── Format validators ──────────────────────────────────────────────────────
+
+_INT8_RANGE   = (-128, 127)
+_INT16_RANGE  = (-32768, 32767)
+_INT32_RANGE  = (-2**31, 2**31 - 1)
+_INT64_RANGE  = (-2**63, 2**63 - 1)
+_UINT8_RANGE  = (0, 255)
+_UINT16_RANGE = (0, 65535)
+_UINT32_RANGE = (0, 2**32 - 1)
+_UINT64_RANGE = (0, 2**64 - 1)
+
+def validate_int8(v):    assert _INT8_RANGE[0] <= int(v) <= _INT8_RANGE[1];    return int(v)
+def validate_int16(v):   assert _INT16_RANGE[0] <= int(v) <= _INT16_RANGE[1];  return int(v)
+def validate_int32(v):   assert _INT32_RANGE[0] <= int(v) <= _INT32_RANGE[1];  return int(v)
+def validate_int64(v):   assert _INT64_RANGE[0] <= int(v) <= _INT64_RANGE[1];  return int(v)
+def validate_uint8(v):   assert _UINT8_RANGE[0] <= int(v) <= _UINT8_RANGE[1];  return int(v)
+def validate_uint16(v):  assert _UINT16_RANGE[0] <= int(v) <= _UINT16_RANGE[1];return int(v)
+def validate_uint32(v):  assert _UINT32_RANGE[0] <= int(v) <= _UINT32_RANGE[1];return int(v)
+def validate_uint64(v):  assert _UINT64_RANGE[0] <= int(v) <= _UINT64_RANGE[1];return int(v)
+def validate_float(v):   return float(v)
+def validate_double(v):  return float(v)
+def validate_decimal(v):
+    from decimal import Decimal; return Decimal(str(v))
+
+_DATE_RE      = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_TIME_RE      = re.compile(r"^\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})?$")
+_DATETIME_RE  = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+_DURATION_RE  = re.compile(r"^P(\d+Y)?(\d+M)?(\d+D)?(T(\d+H)?(\d+M)?(\d+S)?)?$")
+_EMAIL_RE     = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_HOSTNAME_RE  = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$")
+_URI_RE       = re.compile(r"^[a-zA-Z][a-zA-Z0-9+\-.]*:")
+_UUID_RE      = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+_JSON_POINTER_RE = re.compile(r"^(/[^/]*)*$")
+
+def validate_date(v):
+    assert _DATE_RE.match(str(v)), f"Invalid date format: {v}"; return str(v)
+def validate_time(v):
+    assert _TIME_RE.match(str(v)), f"Invalid time format: {v}"; return str(v)
+def validate_datetime(v):
+    assert _DATETIME_RE.match(str(v)), f"Invalid datetime: {v}"; return str(v)
+def validate_duration(v):
+    assert _DURATION_RE.match(str(v)), f"Invalid duration: {v}"; return str(v)
+def validate_email(v):
+    assert _EMAIL_RE.match(str(v)), f"Invalid email: {v}"; return str(v)
+def validate_hostname(v):
+    assert _HOSTNAME_RE.match(str(v)), f"Invalid hostname: {v}"; return str(v)
+def validate_ipv4(v):
+    ipaddress.IPv4Address(str(v)); return str(v)
+def validate_ipv6(v):
+    ipaddress.IPv6Address(str(v)); return str(v)
+def validate_uri(v):
+    assert _URI_RE.match(str(v)), f"Invalid URI: {v}"; return str(v)
+def validate_uuid(v):
+    assert _UUID_RE.match(str(v)), f"Invalid UUID: {v}"; return str(v)
+def validate_json_pointer(v):
+    assert _JSON_POINTER_RE.match(str(v)), f"Invalid JSON pointer: {v}"; return str(v)
+def validate_byte(v):
+    base64.b64decode(str(v)); return str(v)
+def validate_base64url(v):
+    base64.urlsafe_b64decode(str(v) + "=="); return str(v)
+def validate_binary(v):
+    return v  # raw bytes or string, pass through
+def validate_password(v):
+    return str(v)  # treat as opaque string
+def validate_commonmark(v):
+    return str(v)  # no structural validation needed
+def validate_html(v):
+    return str(v)
+
+FORMAT_VALIDATORS: dict[str, Any] = {
+    "int8": validate_int8, "int16": validate_int16,
+    "int32": validate_int32, "int64": validate_int64,
+    "uint8": validate_uint8, "uint16": validate_uint16,
+    "uint32": validate_uint32, "uint64": validate_uint64,
+    "float": validate_float, "double": validate_double,
+    "decimal": validate_decimal, "decimal128": validate_decimal,
+    "date": validate_date, "time": validate_time,
+    "date-time": validate_datetime, "duration": validate_duration,
+    "email": validate_email, "idn-email": validate_email,
+    "hostname": validate_hostname, "idn-hostname": validate_hostname,
+    "ipv4": validate_ipv4, "ipv6": validate_ipv6,
+    "uri": validate_uri, "iri": validate_uri,
+    "uuid": validate_uuid,
+    "json-pointer": validate_json_pointer,
+    "byte": validate_byte, "base64url": validate_base64url,
+    "binary": validate_binary, "password": validate_password,
+    "commonmark": validate_commonmark, "html": validate_html,
+}
+
+def validate_format(value: Any, fmt: str) -> Any:
+    """Apply format validator; raises AssertionError if invalid."""
+    validator = FORMAT_VALIDATORS.get(fmt)
+    if validator:
+        return validator(value)
+    return value
+
+# Sanitization helpers
+_SANITIZE_LOW    = {"password", "token", "secret", "private_key"}
+_SANITIZE_MEDIUM = _SANITIZE_LOW | {"access_token", "credentials", "authorization"}
+_SANITIZE_HIGH   = _SANITIZE_MEDIUM | {"session_id", "cookie", "api_key", "ip_address", "hostname"}
+
+def sanitize_response(data: Any, level: str = "DISABLED") -> Any:
+    """Redact sensitive fields from API response before returning to agent."""
+    if level == "DISABLED" or not isinstance(data, dict):
+        return data
+    fields = {"LOW": _SANITIZE_LOW, "MEDIUM": _SANITIZE_MEDIUM, "HIGH": _SANITIZE_HIGH}.get(level, set())
+    return {
+        k: ("[REDACTED]" if k.lower() in fields else
+            sanitize_response(v, level) if isinstance(v, dict) else v)
+        for k, v in data.items()
+    }
