@@ -1,0 +1,120 @@
+openapi: "3.0.3"
+info:
+  title: Complex Schemas API
+  description: API testing allOf / oneOf / anyOf / nested $ref chains.
+  version: "1.0.0"
+servers:
+  - url: https://api.example.com
+paths:
+  /animals:
+    post:
+      operationId: createAnimal
+      summary: Create an animal (oneOf)
+      description: Accepts either a Cat or a Dog via oneOf.
+      tags:
+        - animals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: "#/components/schemas/Cat"
+                - $ref: "#/components/schemas/Dog"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Animal"
+        "400":
+          description: Bad request
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      summary: Get a pet (allOf composition)
+      description: Returns a pet that extends Animal with extra fields.
+      tags:
+        - animals
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          description: The pet ID.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetDetail"
+        "404":
+          description: Not found
+  /items:
+    get:
+      operationId: listItems
+      summary: List items (anyOf response)
+      description: Returns items that can be either a string or number.
+      tags:
+        - items
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  anyOf:
+                    - type: string
+                    - type: integer
+        "400":
+          description: Bad request
+components:
+  schemas:
+    Animal:
+      type: object
+      required:
+        - id
+        - type
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+    Cat:
+      allOf:
+        - $ref: "#/components/schemas/Animal"
+        - type: object
+          properties:
+            indoor:
+              type: boolean
+    Dog:
+      allOf:
+        - $ref: "#/components/schemas/Animal"
+        - type: object
+          properties:
+            breed:
+              type: string
+    PetDetail:
+      allOf:
+        - $ref: "#/components/schemas/Animal"
+        - type: object
+          properties:
+            name:
+              type: string
+            age:
+              type: integer
+            owner:
+              $ref: "#/components/schemas/Owner"
+    Owner:
+      type: object
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email

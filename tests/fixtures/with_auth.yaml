@@ -1,0 +1,115 @@
+openapi: "3.0.3"
+info:
+  title: Auth API
+  description: API testing all supported auth schemes.
+  version: "1.0.0"
+servers:
+  - url: https://api.example.com
+security:
+  - apiKeyAuth: []
+paths:
+  /protected:
+    get:
+      operationId: getProtected
+      summary: Get protected resource (API key)
+      description: Requires global API key auth.
+      tags:
+        - protected
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+  /bearer-only:
+    get:
+      operationId: getBearerOnly
+      summary: Bearer-only endpoint
+      description: Requires bearer token auth.
+      tags:
+        - protected
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+  /basic-only:
+    get:
+      operationId: getBasicOnly
+      summary: HTTP Basic endpoint
+      description: Requires HTTP Basic auth.
+      tags:
+        - protected
+      security:
+        - basicAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+  /oauth-endpoint:
+    get:
+      operationId: getOauthEndpoint
+      summary: OAuth2 endpoint
+      description: Requires OAuth2 client credentials.
+      tags:
+        - protected
+      security:
+        - oauth2Auth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+  /public:
+    get:
+      operationId: getPublic
+      summary: Public endpoint
+      description: No auth required.
+      tags:
+        - public
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    bearerAuth:
+      type: http
+      scheme: bearer
+    basicAuth:
+      type: http
+      scheme: basic
+    oauth2Auth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.example.com/token
+          scopes:
+            read: Read access
+            write: Write access

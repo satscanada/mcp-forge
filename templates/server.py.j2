@@ -24,6 +24,7 @@ except ImportError:
     pass
 
 {% if has_auth %}import _auth
+{% endif %}{% if needs_base64 %}import base64
 {% endif %}import _models
 import _validators
 import httpx
@@ -64,6 +65,14 @@ _client: httpx.AsyncClient | None = None
 async def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
+{% if has_mtls %}
+        _ssl_kwargs: dict = {}
+        _mtls_registry = _auth.build_auth_registry()
+        for _h in _mtls_registry.values():
+            if hasattr(_h, "get_ssl_kwargs"):
+                _ssl_kwargs = _h.get_ssl_kwargs()
+                break
+{% endif %}
         _client = httpx.AsyncClient(
             timeout=HTTPX_TIMEOUT,
             limits=httpx.Limits(
@@ -71,6 +80,9 @@ async def get_client() -> httpx.AsyncClient:
                 max_keepalive_connections=MAX_KEEPALIVE,
             ),
             follow_redirects=True,
+{% if has_mtls %}
+            **_ssl_kwargs,
+{% endif %}
         )
     return _client
 
@@ -131,6 +143,9 @@ async def _execute_with_resilience(
     headers: dict | None = None,
     params: dict | None = None,
     json: Any = None,
+    data: dict | None = None,
+    files: dict | None = None,
+    content: bytes | None = None,
 ) -> dict[str, Any]:
     if not _cb.allow_request():
         return {
@@ -149,8 +164,17 @@ async def _execute_with_resilience(
             logger.info(f"Retry {attempt}/{MAX_RETRIES} after {delay:.1f}s")
             await asyncio.sleep(delay)
         try:
+            _body_kw: dict[str, Any] = {}
+            if json is not None:
+                _body_kw["json"] = json
+            if data is not None:
+                _body_kw["data"] = data
+            if files is not None:
+                _body_kw["files"] = files
+            if content is not None:
+                _body_kw["content"] = content
             resp = await asyncio.wait_for(
-                client.request(method, url, headers=headers or {}, params=params or {}, json=json),
+                client.request(method, url, headers=headers or {}, params=params or {}, **_body_kw),
                 timeout=TOOL_EXECUTION_TIMEOUT,
             )
             if resp.status_code in retry_codes and attempt < MAX_RETRIES:
@@ -226,19 +250,61 @@ async def {{ operation.function_name }}(
     if params.{{ param.attr_name }} is not None:
         headers[{{ param.original_name | pystr }}] = str(params.{{ param.attr_name }})
 {% endfor %}
-{% if operation.has_body %}
-{% if operation.uses_raw_body %}
-    json_body = params.body
-{% else %}
+{% if not operation.has_body or operation.body_kind == "none" %}
+    json_body = None
+    form_body: dict[str, Any] | None = None
+    files_body: dict[str, Any] | None = None
+    content_body: bytes | None = None
+{% elif operation.body_kind == "json_object" %}
     body_payload: dict[str, Any] = {}
 {% for prop in operation.body_props %}
     if params.{{ prop.attr_name }} is not None:
         body_payload[{{ prop.original_name | pystr }}] = params.{{ prop.attr_name }}
 {% endfor %}
     json_body = body_payload
-{% endif %}
-{% else %}
+    form_body = None
+    files_body = None
+    content_body = None
+{% elif operation.body_kind == "form" %}
     json_body = None
+    _form_payload: dict[str, Any] = {}
+{% for prop in operation.body_props %}
+    if params.{{ prop.attr_name }} is not None:
+        _form_payload[{{ prop.original_name | pystr }}] = params.{{ prop.attr_name }}
+{% endfor %}
+    form_body = _form_payload or None
+    files_body = None
+    content_body = None
+{% elif operation.body_kind == "multipart" %}
+    json_body = None
+    _form_payload: dict[str, Any] = {}
+{% for prop in operation.body_props %}
+    if params.{{ prop.attr_name }} is not None:
+        _form_payload[{{ prop.original_name | pystr }}] = params.{{ prop.attr_name }}
+{% endfor %}
+    form_body = _form_payload or None
+    _files_payload: dict[str, Any] = {}
+{% for field in operation.multipart_file_fields %}
+    if params.{{ field.attr_name }} is not None:
+        _files_payload[{{ field.original_name | pystr }}] = base64.b64decode(params.{{ field.attr_name }})
+{% endfor %}
+    files_body = _files_payload or None
+    content_body = None
+{% elif operation.body_kind == "json_array" %}
+    json_body = params.items
+    form_body = None
+    files_body = None
+    content_body = None
+{% elif operation.body_kind == "binary" %}
+    json_body = None
+    form_body = None
+    files_body = None
+    content_body = base64.b64decode(params.body) if params.body else None
+{% else %}
+    json_body = params.body
+    form_body = None
+    files_body = None
+    content_body = None
 {% endif %}
 {% if operation.needs_auth %}
     auth_map = _auth.build_auth_registry()
@@ -263,6 +329,32 @@ async def {{ operation.function_name }}(
             "message": "Required authentication credentials are not configured for this operation.",
         }
 {% endif %}
+{% if operation.body_kind == "form" %}
+    return await _execute_with_resilience(
+        method={{ operation.method | pystr }},
+        url=url,
+        headers=headers,
+        params=qparams,
+        data=form_body,
+    )
+{% elif operation.body_kind == "multipart" %}
+    return await _execute_with_resilience(
+        method={{ operation.method | pystr }},
+        url=url,
+        headers=headers,
+        params=qparams,
+        data=form_body,
+        files=files_body,
+    )
+{% elif operation.body_kind == "binary" %}
+    return await _execute_with_resilience(
+        method={{ operation.method | pystr }},
+        url=url,
+        headers=headers,
+        params=qparams,
+        content=content_body,
+    )
+{% else %}
     return await _execute_with_resilience(
         method={{ operation.method | pystr }},
         url=url,
@@ -270,6 +362,7 @@ async def {{ operation.function_name }}(
         params=qparams,
         json=json_body,
     )
+{% endif %}
 
 {% endfor %}
 

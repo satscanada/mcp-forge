@@ -1,0 +1,145 @@
+openapi: "3.0.3"
+info:
+  title: Body Kinds API
+  description: API exercising all supported requestBody content types.
+  version: "1.0.0"
+servers:
+  - url: https://api.example.com
+paths:
+  /json-body:
+    post:
+      operationId: jsonBody
+      summary: JSON object body
+      description: Accepts an application/json object body.
+      tags:
+        - bodies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Item name.
+                value:
+                  type: integer
+                  description: Item value.
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad request
+  /multipart-body:
+    post:
+      operationId: multipartBody
+      summary: Multipart form-data body
+      description: Accepts a multipart/form-data body for file uploads.
+      tags:
+        - bodies
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file to upload.
+                description:
+                  type: string
+                  description: File description.
+      responses:
+        "201":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad request
+  /form-body:
+    post:
+      operationId: formBody
+      summary: URL-encoded form body
+      description: Accepts application/x-www-form-urlencoded.
+      tags:
+        - bodies
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  description: The username.
+                password:
+                  type: string
+                  description: The password.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad request
+  /array-body:
+    post:
+      operationId: arrayBody
+      summary: JSON array body
+      description: Accepts an application/json array body.
+      tags:
+        - bodies
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        "400":
+          description: Bad request
+  /binary-body:
+    post:
+      operationId: binaryBody
+      summary: Binary body upload
+      description: Accepts raw binary data.
+      tags:
+        - bodies
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad request

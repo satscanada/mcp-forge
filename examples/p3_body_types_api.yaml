@@ -1,0 +1,121 @@
+openapi: 3.1.0
+info:
+  title: P3 Body Types API
+  description: Test spec covering all requestBody content types for Phase 2 P3 validation.
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+
+paths:
+  /echo/json-object:
+    post:
+      operationId: echoJsonObject
+      summary: Echo a JSON object body
+      description: Accepts a flat JSON object and echoes it back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  description: The name field
+                age:
+                  type: integer
+                  description: Optional age
+      responses:
+        "200":
+          description: Echoed object
+
+  /echo/json-array:
+    post:
+      operationId: echoJsonArray
+      summary: Echo a JSON array body
+      description: Accepts an array of strings and echoes it back.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+      responses:
+        "200":
+          description: Echoed array
+
+  /submit/form:
+    post:
+      operationId: submitForm
+      summary: Submit a URL-encoded form
+      description: Accepts application/x-www-form-urlencoded data.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  description: Login username
+                password:
+                  type: string
+                  description: Login password
+                remember_me:
+                  type: boolean
+                  description: Keep session alive
+      responses:
+        "200":
+          description: Form accepted
+
+  /upload/multipart:
+    post:
+      operationId: uploadMultipart
+      summary: Upload a file with multipart form data
+      description: Accepts multipart/form-data with a binary file and metadata fields.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file to upload
+                filename:
+                  type: string
+                  description: Optional filename override
+                description:
+                  type: string
+                  description: Optional file description
+      responses:
+        "201":
+          description: File uploaded
+
+  /upload/binary:
+    put:
+      operationId: uploadBinary
+      summary: Upload raw binary content
+      description: Accepts application/octet-stream binary data (base64-encoded by caller).
+      requestBody:
+        required: false
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Binary data accepted

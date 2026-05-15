@@ -1,0 +1,80 @@
+openapi: "3.0.3"
+info:
+  title: Error Spec
+  description: Spec designed to trigger quality errors.
+  version: "1.0.0"
+paths:
+  /things:
+    get:
+      operationId: duplicateId
+      summary: First operation
+      tags:
+        - things
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+  /stuff:
+    get:
+      operationId: duplicateId
+      summary: Second operation with duplicate operationId
+      tags:
+        - stuff
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DoesNotExist"
+  /path/{missingParam}:
+    get:
+      operationId: missingPathParam
+      summary: Path param not declared in parameters
+      tags:
+        - path
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+  /injected:
+    get:
+      operationId: injectedOp
+      summary: Operation with script injection in description
+      description: "<script>alert('xss')</script>"
+      tags:
+        - security
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+  /bad-security:
+    get:
+      operationId: badSecurity
+      summary: References undefined security scheme
+      tags:
+        - security
+      security:
+        - undefinedScheme: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  securitySchemes:
+    realScheme:
+      type: apiKey
+      in: header
+      name: X-Real-Key

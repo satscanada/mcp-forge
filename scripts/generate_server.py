@@ -470,7 +470,39 @@ def build_auth_scheme_contexts(schemes: dict[str, dict[str, Any]], force_api_key
 
         if scheme_type == "http":
             http_scheme = (scheme_def.get("scheme") or "").lower()
-            if http_scheme == "bearer":
+            bearer_format = (scheme_def.get("bearerFormat") or "").upper()
+            if http_scheme == "bearer" and bearer_format == "JWT":
+                contexts.append(
+                    {
+                        "name": scheme_name,
+                        "type": "http_bearer_jwt",
+                        "class_name": "JWTAuth",
+                        "env_vars": [
+                            {
+                                "name": env_key_for_scheme(scheme_name, "JWT_SECRET"),
+                                "example": "",
+                                "description": f"HMAC secret for JWT signing for scheme {scheme_name}",
+                            },
+                            {
+                                "name": env_key_for_scheme(scheme_name, "JWT_ALGORITHM"),
+                                "example": "HS256",
+                                "description": "JWT signing algorithm (HS256, HS384, HS512)",
+                            },
+                            {
+                                "name": env_key_for_scheme(scheme_name, "JWT_EXPIRY_SECONDS"),
+                                "example": "3600",
+                                "description": "JWT token lifetime in seconds",
+                            },
+                        ],
+                        "registry_args": [
+                            {"name": "secret_env", "value": env_key_for_scheme(scheme_name, "JWT_SECRET")},
+                            {"name": "algorithm_env", "value": env_key_for_scheme(scheme_name, "JWT_ALGORITHM")},
+                            {"name": "expiry_env", "value": env_key_for_scheme(scheme_name, "JWT_EXPIRY_SECONDS")},
+                        ],
+                        "summary": f"JWT Bearer ({scheme_name})",
+                    }
+                )
+            elif http_scheme == "bearer":
                 contexts.append(
                     {
                         "name": scheme_name,
@@ -561,6 +593,38 @@ def build_auth_scheme_contexts(schemes: dict[str, dict[str, Any]], force_api_key
                     }
                 )
 
+        if scheme_type == "mutualTLS":
+            contexts.append(
+                {
+                    "name": scheme_name,
+                    "type": "mutualTLS",
+                    "class_name": "MTLSAuth",
+                    "env_vars": [
+                        {
+                            "name": env_key_for_scheme(scheme_name, "MTLS_CERT_PATH"),
+                            "example": "/path/to/client.crt",
+                            "description": f"Path to PEM client certificate for scheme {scheme_name}",
+                        },
+                        {
+                            "name": env_key_for_scheme(scheme_name, "MTLS_KEY_PATH"),
+                            "example": "/path/to/client.key",
+                            "description": f"Path to PEM private key for scheme {scheme_name}",
+                        },
+                        {
+                            "name": env_key_for_scheme(scheme_name, "MTLS_CA_PATH"),
+                            "example": "/path/to/ca.crt",
+                            "description": f"Path to PEM CA bundle for scheme {scheme_name} (optional)",
+                        },
+                    ],
+                    "registry_args": [
+                        {"name": "cert_env", "value": env_key_for_scheme(scheme_name, "MTLS_CERT_PATH")},
+                        {"name": "key_env", "value": env_key_for_scheme(scheme_name, "MTLS_KEY_PATH")},
+                        {"name": "ca_env", "value": env_key_for_scheme(scheme_name, "MTLS_CA_PATH")},
+                    ],
+                    "summary": f"Mutual TLS ({scheme_name})",
+                }
+            )
+
     return contexts
 
 
@@ -569,6 +633,107 @@ def summarize_auth_schemes(schemes: dict[str, dict[str, Any]], force_api_key: bo
     if not contexts:
         return "none"
     return ", ".join(ctx["summary"] for ctx in contexts)
+
+
+# ──────────────────────────────────────────────────────────────
+# requestBody content-type detection helpers (P3)
+# ──────────────────────────────────────────────────────────────
+
+FORM_CONTENT_TYPES = frozenset({"application/x-www-form-urlencoded", "multipart/form-data"})
+BINARY_CONTENT_TYPES = frozenset({
+    "application/octet-stream",
+    "image/png", "image/jpeg", "image/gif", "image/webp",
+    "image/svg+xml", "video/mp4", "audio/mpeg", "audio/wav",
+})
+
+
+def _body_content_priority(ct: str) -> int:
+    """Lower = preferred when multiple content types are offered."""
+    if ct == "application/json":
+        return 0
+    if ct in FORM_CONTENT_TYPES:
+        return 1
+    if ct in BINARY_CONTENT_TYPES:
+        return 2
+    return 10
+
+
+def extract_body_info(body: dict, resolver: "SchemaResolver") -> dict[str, Any]:
+    """Analyse a requestBody dict and return a unified description for code generation.
+
+    Returns a dict with keys:
+      kind         — "none" | "json_object" | "json_array" | "form" |
+                     "multipart" | "binary" | "raw"
+      content_type — the chosen MIME type string
+      flat_props   — {prop_name: schema} for object-like bodies
+      required_props — set of required property names
+      array_item_schema — schema for items (json_array only)
+      file_field_names  — fields with format:binary (multipart only)
+      body_required — bool
+    """
+    _empty: dict[str, Any] = {
+        "kind": "none",
+        "content_type": "",
+        "flat_props": {},
+        "required_props": set(),
+        "array_item_schema": {},
+        "file_field_names": set(),
+        "body_required": False,
+    }
+    if not body:
+        return _empty
+
+    content = body.get("content", {})
+    body_required = bool(body.get("required", False))
+    if not content:
+        return _empty
+
+    # Pick the most specific / preferred content type
+    chosen_ct = min(content, key=_body_content_priority)
+    media_obj = content[chosen_ct]
+    schema = resolver.get_schema(media_obj.get("schema", {}))
+
+    base: dict[str, Any] = {
+        "content_type": chosen_ct,
+        "body_required": body_required,
+        "flat_props": {},
+        "required_props": set(),
+        "array_item_schema": {},
+        "file_field_names": set(),
+    }
+
+    if chosen_ct == "multipart/form-data":
+        flattened = flatten_body_schema(schema)
+        if flattened:
+            props, req = flattened
+            file_fields = {
+                name for name, s in props.items()
+                if resolver.get_schema(s).get("format") in ("binary", "byte")
+            }
+            return {**base, "kind": "multipart", "flat_props": props,
+                    "required_props": req, "file_field_names": file_fields}
+        return {**base, "kind": "raw"}
+
+    if chosen_ct == "application/x-www-form-urlencoded":
+        flattened = flatten_body_schema(schema)
+        if flattened:
+            props, req = flattened
+            return {**base, "kind": "form", "flat_props": props, "required_props": req}
+        return {**base, "kind": "raw"}
+
+    if chosen_ct in BINARY_CONTENT_TYPES or schema.get("format") in ("binary", "byte"):
+        return {**base, "kind": "binary"}
+
+    # application/json (or other) — check array vs object
+    if schema.get("type") == "array":
+        return {**base, "kind": "json_array", "array_item_schema": schema.get("items", {})}
+
+    flattened = flatten_body_schema(schema)
+    if flattened:
+        props, req = flattened
+        return {**base, "kind": "json_object", "flat_props": props, "required_props": req}
+
+    return {**base, "kind": "raw"}
 
 
 def build_model_field(
@@ -661,35 +826,58 @@ def build_model_context(resolver: SchemaResolver, op: dict) -> dict[str, Any]:
         )
         fields.append(field)
 
-    body = op.get("request_body", {})
-    if body:
-        content = body.get("content", {})
-        for media in content.values():
-            body_schema = resolver.get_schema(media.get("schema", {}))
-            flattened_body = flatten_body_schema(body_schema)
-            if flattened_body:
-                props, required_props = flattened_body
-                for prop_name, prop_schema in props.items():
-                    resolved_prop_schema = resolver.get_schema(prop_schema)
-                    fields.append(
-                        build_model_field(
-                            name=slugify(prop_name),
-                            py_type=python_type(resolved_prop_schema),
-                            required=prop_name in required_props,
-                            description=clean_description(resolved_prop_schema.get("description")),
-                            default=resolved_prop_schema.get("default"),
-                            use_field_wrapper=prop_name in required_props,
-                        )
-                    )
-            else:
-                fields.append(
-                    {
-                        "name": "body",
-                        "type_annotation": "Optional[Any]",
-                        "default_expr": "None",
-                    }
-                )
-            break
+    body_info = extract_body_info(op.get("request_body", {}), resolver)
+    kind = body_info["kind"]
+
+    if kind in ("json_object", "form", "multipart"):
+        props = body_info["flat_props"]
+        req = body_info["required_props"]
+        file_fields = body_info["file_field_names"]
+        for prop_name, prop_schema in props.items():
+            resolved = resolver.get_schema(prop_schema)
+            is_file = prop_name in file_fields
+            py_type_str = "str" if is_file else python_type(resolved)
+            desc = clean_description(resolved.get("description"))
+            if is_file:
+                desc = (desc + " (base64-encoded binary)").strip()
+            fields.append(build_model_field(
+                name=slugify(prop_name),
+                py_type=py_type_str,
+                required=prop_name in req,
+                description=desc,
+                default=resolved.get("default"),
+                use_field_wrapper=prop_name in req,
+            ))
+
+    elif kind == "json_array":
+        item_type = python_type(resolver.get_schema(body_info["array_item_schema"]))
+        arr_type = f"list[{item_type}]"
+        if body_info["body_required"]:
+            fields.append({
+                "name": "items",
+                "type_annotation": arr_type,
+                "default_expr": 'Field(..., description="Array request body")',
+            })
+        else:
+            fields.append({
+                "name": "items",
+                "type_annotation": f"Optional[{arr_type}]",
+                "default_expr": "None",
+            })
+
+    elif kind == "binary":
+        fields.append({
+            "name": "body",
+            "type_annotation": "Optional[str]",
+            "default_expr": 'Field(None, description="Base64-encoded binary content")',
+        })
+
+    elif kind == "raw":
+        fields.append({
+            "name": "body",
+            "type_annotation": "Optional[Any]",
+            "default_expr": "None",
+        })
 
     return {
         "class_name": operation_class_name(op["operation_id"]),
@@ -744,35 +932,67 @@ def build_tool_context(resolver: SchemaResolver, op: dict, auth_info: dict) -> d
 
     request_body = op.get("request_body", {})
     has_body = bool(request_body)
-    uses_raw_body = False
+    body_info = extract_body_info(request_body, resolver)
+    body_kind = body_info["kind"]  # "none"|"json_object"|"json_array"|"form"|"multipart"|"binary"|"raw"
+
+    uses_raw_body = has_body and body_kind in ("raw",)
     body_props: list[dict[str, str]] = []
+    multipart_file_fields: list[dict[str, str]] = []
     body_signature_params: list[dict[str, Any]] = []
 
-    if has_body:
-        content = request_body.get("content", {})
-        for media in content.values():
-            body_schema = resolver.get_schema(media.get("schema", {}))
-            flattened_body = flatten_body_schema(body_schema)
-            if flattened_body:
-                props, required_props = flattened_body
-                for prop_name, prop_schema in props.items():
-                    resolved_prop_schema = resolver.get_schema(prop_schema)
-                    attr_name = slugify(prop_name)
+    if has_body and body_kind != "none":
+        if body_kind in ("json_object", "form"):
+            props = body_info["flat_props"]
+            req = body_info["required_props"]
+            for prop_name, prop_schema in props.items():
+                resolved = resolver.get_schema(prop_schema)
+                attr_name = slugify(prop_name)
+                body_props.append({"original_name": prop_name, "attr_name": attr_name})
+                body_signature_params.append(build_signature_entry(
+                    name=attr_name,
+                    py_type=python_type(resolved),
+                    required=prop_name in req,
+                    default=resolved.get("default"),
+                ))
+
+        elif body_kind == "multipart":
+            props = body_info["flat_props"]
+            req = body_info["required_props"]
+            file_fields = body_info["file_field_names"]
+            for prop_name, prop_schema in props.items():
+                resolved = resolver.get_schema(prop_schema)
+                attr_name = slugify(prop_name)
+                is_file = prop_name in file_fields
+                if is_file:
+                    multipart_file_fields.append({"original_name": prop_name, "attr_name": attr_name})
+                else:
                     body_props.append({"original_name": prop_name, "attr_name": attr_name})
-                    body_signature_params.append(
-                        build_signature_entry(
-                            name=attr_name,
-                            py_type=python_type(resolved_prop_schema),
-                            required=prop_name in required_props,
-                            default=resolved_prop_schema.get("default"),
-                        )
-                    )
-            else:
-                uses_raw_body = True
-                body_signature_params.append(
-                    {"name": "body", "type_annotation": "Any | None", "required": False, "default_expr": "None"}
-                )
-            break
+                body_signature_params.append(build_signature_entry(
+                    name=attr_name,
+                    py_type="str" if is_file else python_type(resolved),
+                    required=prop_name in req,
+                    default=resolved.get("default"),
+                ))
+
+        elif body_kind == "json_array":
+            item_type = python_type(resolver.get_schema(body_info["array_item_schema"]))
+            body_signature_params.append(build_signature_entry(
+                name="items",
+                py_type=f"list[{item_type}]",
+                required=body_info["body_required"],
+                default=None,
+            ))
+
+        elif body_kind == "binary":
+            body_signature_params.append(
+                {"name": "body", "type_annotation": "str | None", "required": False, "default_expr": "None"}
+            )
+
+        else:  # raw
+            uses_raw_body = True
+            body_signature_params.append(
+                {"name": "body", "type_annotation": "Any | None", "required": False, "default_expr": "None"}
+            )
 
     path_format = op["path"]
     for path_param in path_params:
@@ -809,8 +1029,10 @@ def build_tool_context(resolver: SchemaResolver, op: dict, auth_info: dict) -> d
         "query_params": query_params,
         "header_params": header_params,
         "has_body": has_body,
+        "body_kind": body_kind,
         "uses_raw_body": uses_raw_body,
         "body_props": body_props,
+        "multipart_file_fields": multipart_file_fields,
         "needs_auth": needs_auth,
     }
 
@@ -859,13 +1081,20 @@ def gen_server(spec: dict, resolver: SchemaResolver, ops: list[dict], server_nam
     if servers and isinstance(servers[0], dict):
         base_url = servers[0].get("url", "")
 
+    tool_contexts = [build_tool_context(resolver, op, auth_info) for op in ops]
+    needs_base64 = any(ctx["body_kind"] in ("multipart", "binary") for ctx in tool_contexts)
+    scheme_contexts = build_auth_scheme_contexts(auth_info["schemes"], force_api_key=False)
+    has_mtls = any(ctx["class_name"] == "MTLSAuth" for ctx in scheme_contexts)
+
     context = {
         "server_name": server_name,
         "api_title": info.get("title", server_name),
         "api_version": info.get("version", "1.0.0"),
         "base_url": base_url,
         "has_auth": auth_info["has_auth"],
-        "operations": [build_tool_context(resolver, op, auth_info) for op in ops],
+        "has_mtls": has_mtls,
+        "needs_base64": needs_base64,
+        "operations": tool_contexts,
     }
     return render_template("server.py.j2", context)
 
@@ -891,6 +1120,14 @@ def gen_requirements(has_auth: bool) -> str:
         "python-dotenv>=1.0.0,<2.0.0",
     ]
     return "\n".join(lines) + "\n"
+
+
+def gen_license(server_name: str) -> str:
+    import datetime
+    return render_template("LICENSE.j2", {
+        "year": datetime.date.today().year,
+        "server_name": server_name,
+    })
 
 
 def gen_dockerfile(server_name: str) -> str:
@@ -961,6 +1198,7 @@ def generate(spec_path: Path, output_dir: Path, server_name: str, force_api_key:
         "Dockerfile": gen_dockerfile(server_name),
         ".mcp.json": gen_mcp_json(server_name),
         "README.md": gen_readme(spec, server_name, ops, auth_info),
+        "LICENSE": gen_license(server_name),
     }
 
     auth_code = gen_auth(spec, resolver, force_api_key)

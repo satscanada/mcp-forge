@@ -69,6 +69,60 @@ class BearerTokenAuth:
         return bool(self.token)
 
 {% endif %}
+{% if "JWTAuth" in class_names %}
+class JWTAuth:
+    """JWT Bearer auth — creates a signed JWT (HS256/HS384/HS512) from a shared secret.
+
+    Only HMAC-based algorithms are supported without extra dependencies.
+    For RSA/ECDSA signing install PyJWT and replace this class with a PyJWT-backed handler.
+    """
+
+    _ALG_MAP = {"HS256": "sha256", "HS384": "sha384", "HS512": "sha512"}
+
+    def __init__(
+        self,
+        secret_env: str = "JWT_SECRET",
+        algorithm_env: str = "JWT_ALGORITHM",
+        expiry_env: str = "JWT_EXPIRY_SECONDS",
+    ):
+        self.secret = os.getenv(secret_env, "").strip()
+        self.algorithm = os.getenv(algorithm_env, "HS256").strip().upper()
+        self.expiry = int(os.getenv(expiry_env, "3600") or "3600")
+        if not self.secret:
+            raise ValueError(
+                f"{secret_env} environment variable not set. "
+                "Set it in .env to enable JWT auth."
+            )
+        if self.algorithm not in self._ALG_MAP:
+            raise ValueError(
+                f"JWT_ALGORITHM '{self.algorithm}' not supported. "
+                f"Use one of: {', '.join(self._ALG_MAP)}."
+            )
+
+    def _make_token(self) -> str:
+        import hashlib
+        import hmac as _hmac
+
+        now = int(time.time())
+        hdr = base64.urlsafe_b64encode(
+            json.dumps({"alg": self.algorithm, "typ": "JWT"}).encode()
+        ).rstrip(b"=").decode()
+        pld = base64.urlsafe_b64encode(
+            json.dumps({"iat": now, "exp": now + self.expiry}).encode()
+        ).rstrip(b"=").decode()
+        signing_input = f"{hdr}.{pld}".encode("ascii")
+        digestmod = getattr(hashlib, self._ALG_MAP[self.algorithm])
+        sig = _hmac.new(self.secret.encode("utf-8"), signing_input, digestmod).digest()
+        sig_b64 = base64.urlsafe_b64encode(sig).rstrip(b"=").decode()
+        return f"{hdr}.{pld}.{sig_b64}"
+
+    def inject(self, headers: dict, params: dict, cookies: dict) -> None:
+        headers["Authorization"] = f"Bearer {self._make_token()}"
+
+    def is_available(self) -> bool:
+        return bool(self.secret)
+
+{% endif %}
 {% if "BasicAuth" in class_names %}
 class BasicAuth:
     """HTTP Basic authentication using username/password from the environment."""
@@ -150,6 +204,48 @@ class OAuth2ClientCredentialsAuth:
 
     def is_available(self) -> bool:
         return bool(self.client_id and self.client_secret and self.token_url)
+
+{% endif %}
+{% if "MTLSAuth" in class_names %}
+class MTLSAuth:
+    """Mutual TLS (mTLS) authentication — loads a client certificate onto the httpx SSL context.
+
+    Unlike header-based auth, mTLS is transport-level. This class exposes
+    ``get_ssl_kwargs()`` which is consumed by ``get_client()`` in server.py
+    to configure the httpx.AsyncClient with the appropriate SSL context.
+    """
+
+    def __init__(
+        self,
+        cert_env: str = "MTLS_CERT_PATH",
+        key_env: str = "MTLS_KEY_PATH",
+        ca_env: str = "MTLS_CA_PATH",
+    ):
+        self.cert_path = os.getenv(cert_env, "").strip()
+        self.key_path = os.getenv(key_env, "").strip()
+        self.ca_path = os.getenv(ca_env, "").strip()
+        if not self.cert_path or not self.key_path:
+            raise ValueError(
+                f"{cert_env}/{key_env} environment variables not set. "
+                "Set them in .env to enable mTLS auth."
+            )
+
+    def inject(self, headers: dict, params: dict, cookies: dict) -> None:
+        """No-op: mTLS is transport-level — per-request header injection is not required."""
+
+    def get_ssl_kwargs(self) -> dict:
+        """Return keyword arguments suitable for httpx.AsyncClient(**kwargs)."""
+        import ssl
+
+        ctx = ssl.create_default_context(
+            purpose=ssl.Purpose.SERVER_AUTH,
+            cafile=self.ca_path or None,
+        )
+        ctx.load_cert_chain(certfile=self.cert_path, keyfile=self.key_path or None)
+        return {"verify": ctx}
+
+    def is_available(self) -> bool:
+        return bool(self.cert_path and self.key_path)
 
 {% endif %}
 # ════════════════════════════════════════════════════

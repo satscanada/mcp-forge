@@ -1,0 +1,94 @@
+openapi: "3.0.3"
+info:
+  title: mTLS API
+  description: Example API using mutual TLS (mTLS) client certificate authentication.
+  version: "1.0.0"
+servers:
+  - url: https://secure.api.example.com/v1
+security:
+  - mtlsAuth: []
+paths:
+  /accounts:
+    get:
+      operationId: listAccounts
+      summary: List accounts
+      description: Returns all accounts accessible with the provided client certificate.
+      security:
+        - mtlsAuth: []
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+        "401":
+          description: Client certificate required or invalid
+  /accounts/{accountId}:
+    get:
+      operationId: getAccount
+      summary: Get account by ID
+      description: Returns details of a specific account.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - mtlsAuth: []
+      responses:
+        "200":
+          description: Account details
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Client certificate required or invalid
+        "404":
+          description: Account not found
+  /accounts/{accountId}/transactions:
+    get:
+      operationId: listTransactions
+      summary: List transactions for an account
+      description: Returns transactions for a specific account.
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: from_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      security:
+        - mtlsAuth: []
+      responses:
+        "200":
+          description: Transaction list
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Client certificate required or invalid
+components:
+  securitySchemes:
+    mtlsAuth:
+      type: mutualTLS
+      description: Mutual TLS using a client certificate and private key.
